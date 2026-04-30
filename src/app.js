@@ -16,7 +16,8 @@ app.use(cors({
   origin: [
     "http://localhost:5173",
     "https://autotradeks.com",
-    "https://www.autotradeks.com"
+    "https://www.autotradeks.com",
+    "https://autotradeks.netlify.app/"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
