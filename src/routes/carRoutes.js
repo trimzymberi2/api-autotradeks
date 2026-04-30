@@ -5,12 +5,14 @@ import {
   getCarById,
   updateCar,
   deleteCar,
+  getPromotedCars,
 } from "../controllers/carController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import upload, { processToWebP } from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
+router.get("/promoted", getPromotedCars);
 router.get("/", getCars);
 router.get("/:id", getCarById);
 

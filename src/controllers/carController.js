@@ -344,3 +344,44 @@ export const deleteCar = async (req, res) => {
     res.status(500).json({ message: "Error deleting car" });
   }
 };
+
+export const getPromotedCars = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        cars.*,
+        users.name AS user_name,
+        users.phone AS user_phone,
+        promoted_cars.position
+      FROM promoted_cars
+      JOIN cars ON promoted_cars.car_id = cars.id
+      JOIN users ON cars.user_id = users.id
+      WHERE promoted_cars.is_active = true
+      ORDER BY promoted_cars.position ASC, promoted_cars.created_at DESC
+    `);
+
+    const cars = result.rows;
+
+    for (const car of cars) {
+      const imagesResult = await pool.query(
+        "SELECT image_url FROM car_images WHERE car_id = $1",
+        [car.id]
+      );
+
+      car.images = imagesResult.rows.map((img) => img.image_url);
+
+      car.user = {
+        name: car.user_name,
+        phone: car.user_phone,
+      };
+
+      delete car.user_name;
+      delete car.user_phone;
+    }
+
+    res.json(cars);
+  } catch (err) {
+    console.error("GET PROMOTED CARS ERROR:", err);
+    res.status(500).json({ message: "Error fetching promoted cars" });
+  }
+};
