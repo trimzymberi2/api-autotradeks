@@ -2,6 +2,7 @@ import express from "express";
 import {
   createCar,
   getCars,
+  getCarsByUser,
   getCarById,
   updateCar,
   deleteCar,
@@ -13,6 +14,7 @@ import upload, { processToWebP } from "../middleware/uploadMiddleware.js";
 const router = express.Router();
 
 router.get("/promoted", getPromotedCars);
+router.get("/my-cars", protect, getCarsByUser);
 router.get("/", getCars);
 router.get("/:id", getCarById);
 

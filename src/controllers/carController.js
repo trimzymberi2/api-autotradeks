@@ -71,6 +71,31 @@ export const createCar = async (req, res) => {
   }
 };
 
+export const getCarsByUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT c.*, 
+        COALESCE(
+          json_agg(
+            ci.image_url
+          ) FILTER (WHERE ci.image_url IS NOT NULL), '[]'
+        ) as images
+      FROM cars c
+      LEFT JOIN car_images ci ON c.id = ci.car_id
+      WHERE c.user_id = $1
+      GROUP BY c.id
+      ORDER BY c.created_at DESC`,
+      [userId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching user cars", error: err.message });
+  }
+};
+
 export const getCars = async (req, res) => {
   try {
     const {
