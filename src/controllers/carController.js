@@ -313,33 +313,98 @@ export const getCarById = async (req, res) => {
 };
 
 export const updateCar = async (req, res) => {
+  const client = await pool.connect();
+
   try {
-    console.log(req.params, req.body);
     const { id } = req.params;
 
-    const result = await pool.query(
-      "SELECT * FROM cars WHERE id=$1",
-      [id]
-    );
+    const {
+      title,
+      description,
+      price,
+      brand,
+      model,
+      year,
+      mileage,
+      fuel_type,
+      transmission,
+      city,
+      motor,
+      customs,
+      drivesystem,
+      color,
+      imagesToDelete = [],
+    } = req.body;
 
+    await client.query("BEGIN");
+
+    const result = await client.query("SELECT * FROM cars WHERE id=$1", [id]);
     const car = result.rows[0];
 
     if (!car) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ message: "Car not found" });
     }
 
     if (car.user_id !== req.user.id) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ message: "Not authorized" });
     }
 
-    const updated = await pool.query(
-      `UPDATE cars SET title=$1, description=$2, price=$3 WHERE id=$4 RETURNING *`,
-      [req.body.title, req.body.description, req.body.price, id]
+    const updated = await client.query(
+      `UPDATE cars 
+       SET title=$1, description=$2, price=$3, brand=$4, model=$5, year=$6,
+           mileage=$7, fuel_type=$8, transmission=$9, city=$10, motor=$11,
+           customs=$12, drivesystem=$13, color=$14
+       WHERE id=$15
+       RETURNING *`,
+      [
+        title,
+        description,
+        price,
+        brand,
+        model,
+        year,
+        mileage,
+        fuel_type,
+        transmission,
+        city,
+        motor,
+        customs === "true" || customs === true,
+        drivesystem,
+        color,
+        id,
+      ]
     );
+
+    if (imagesToDelete.length > 0) {
+      for (const imageUrl of imagesToDelete) {
+        const publicId = imageUrl
+          .split("/")
+          .pop()
+          .split(".")[0];
+
+        await cloudinary.uploader.destroy(publicId);
+
+        await client.query(
+          "DELETE FROM car_images WHERE car_id=$1 AND image_url=$2",
+          [id, imageUrl]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
 
     res.json(updated.rows[0]);
   } catch (err) {
-    res.status(500).json({ message: "Error updating car" });
+    await client.query("ROLLBACK");
+    console.error("UPDATE CAR ERROR:", err);
+    res.status(500).json({
+      message: "Error updating car",
+      error: err.message,
+    });
+  } finally {
+    client.release();
   }
 };
 
