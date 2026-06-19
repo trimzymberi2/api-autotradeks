@@ -377,14 +377,31 @@ export const updateCar = async (req, res) => {
       ]
     );
 
-    if (imagesToDelete.length > 0) {
-      for (const imageUrl of imagesToDelete) {
-        const publicId = imageUrl
-          .split("/")
-          .pop()
-          .split(".")[0];
+    const imagesToDeleteList = Array.isArray(imagesToDelete)
+      ? imagesToDelete
+      : imagesToDelete
+        ? [imagesToDelete]
+        : [];
 
-        await cloudinary.uploader.destroy(publicId);
+    if (imagesToDeleteList.length > 0) {
+      for (const imageUrl of imagesToDeleteList) {
+        const imageResult = await client.query(
+          "SELECT image_url FROM car_images WHERE car_id=$1 AND image_url=$2",
+          [id, imageUrl]
+        );
+
+        if (imageResult.rows.length === 0) {
+          continue;
+        }
+
+        const publicId = imageUrl
+          .split("/upload/")[1]
+          ?.replace(/^v\d+\//, "")
+          ?.replace(/\.[^/.]+$/, "");
+
+        if (publicId) {
+          await cloudinary.uploader.destroy(publicId);
+        }
 
         await client.query(
           "DELETE FROM car_images WHERE car_id=$1 AND image_url=$2",
