@@ -2,12 +2,12 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
 import { generateToken } from "../utils/generateToken.js";
+import { logError } from "../utils/logError.js";
 
 export const register = async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
 
-    // Check if user exists
     const existing = await pool.query(
       "SELECT * FROM users WHERE email=$1",
       [email]
@@ -17,10 +17,8 @@ export const register = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    // Insert user
     const result = await pool.query(
       "INSERT INTO users (name, email, password, phone) VALUES ($1,$2,$3,$4) RETURNING id,name,email,phone",
       [name, email, hashed, phone]
@@ -31,7 +29,7 @@ export const register = async (req, res) => {
       token: generateToken(result.rows[0].id),
     });
   } catch (err) {
-    console.error(err);
+    logError("POST /api/auth/register", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -66,7 +64,7 @@ export const login = async (req, res) => {
       token: generateToken(user.id),
     });
   } catch (err) {
-    console.error(err);
+    logError("POST /api/auth/login", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -81,15 +79,14 @@ export const getMe = async (req, res) => {
 
     const token = authHeader.split(" ")[1];
 
-    // Verify and decode token
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
+      logError("GET /api/auth/me - token verification", err);
       return res.status(401).json({ message: "Invalid or expired token" });
     }
 
-    // Fetch user from database
     const result = await pool.query(
       "SELECT id, name, email, phone, role, avatar, created_at FROM users WHERE id = $1",
       [decoded.id]
@@ -111,7 +108,7 @@ export const getMe = async (req, res) => {
       createdAt: user.created_at,
     });
   } catch (err) {
-    console.error(err);
+    logError("GET /api/auth/me", err);
     res.status(500).json({ message: "Server error" });
   }
 };

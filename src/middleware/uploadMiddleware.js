@@ -2,6 +2,7 @@ import multer from "multer";
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
+import { logError } from "../utils/logError.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -64,7 +65,7 @@ export const processToWebP = async (req, res, next) => {
     req.files = processedFiles;
     next();
   } catch (error) {
-    console.error("Error processing images:", error);
+    logError("uploadMiddleware processToWebP", error);
     next(error);
   }
 };

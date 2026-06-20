@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
+import { logError } from "../utils/logError.js";
 
 export const protect = async (req, res, next) => {
   if (!req.headers.authorization?.startsWith("Bearer")) {
@@ -21,7 +22,8 @@ export const protect = async (req, res, next) => {
 
     req.user = result.rows[0];
     next();
-  } catch {
+  } catch (err) {
+    logError("authMiddleware protect", err);
     res.status(401).json({ message: "Not authorized" });
   }
 };

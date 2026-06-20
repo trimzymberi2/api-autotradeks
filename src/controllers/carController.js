@@ -1,5 +1,6 @@
 import pool from "../config/db.js";
 import cloudinary from "../config/cloudinary.js";
+import { logError } from "../utils/logError.js";
 
 export const createCar = async (req, res) => {
   try {
@@ -63,7 +64,7 @@ export const createCar = async (req, res) => {
 
     res.json(car);
   } catch (err) {
-    console.error("FULL ERROR:", err);
+    logError("POST /api/cars", err);
     res.status(500).json({
       message: "Error creating car",
       error: err.message,
@@ -92,6 +93,7 @@ export const getCarsByUser = async (req, res) => {
 
     res.json(result.rows);
   } catch (err) {
+    logError("GET /api/cars/my-cars", err);
     res.status(500).json({ message: "Error fetching user cars", error: err.message });
   }
 };
@@ -264,7 +266,7 @@ export const getCars = async (req, res) => {
       cars,
     });
   } catch (err) {
-    console.error("GET CARS ERROR:", err);
+    logError("GET /api/cars", err);
     res.status(500).json({ message: "Error fetching cars" });
   }
 };
@@ -307,7 +309,7 @@ export const getCarById = async (req, res) => {
 
     res.json(car);
   } catch (err) {
-    console.error("GET CAR BY ID ERROR:", err);
+    logError("GET /api/cars/:id", err);
     res.status(500).json({ message: "Error fetching car" });
   }
 };
@@ -415,7 +417,7 @@ export const updateCar = async (req, res) => {
     res.json(updated.rows[0]);
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("UPDATE CAR ERROR:", err);
+    logError("PUT /api/cars/:id", err);
     res.status(500).json({
       message: "Error updating car",
       error: err.message,
@@ -448,6 +450,7 @@ export const deleteCar = async (req, res) => {
 
     res.json({ message: "Car deleted" });
   } catch (err) {
+    logError("DELETE /api/cars/:id", err);
     res.status(500).json({ message: "Error deleting car" });
   }
 };
@@ -488,7 +491,7 @@ export const getPromotedCars = async (req, res) => {
 
     res.json(cars);
   } catch (err) {
-    console.error("GET PROMOTED CARS ERROR:", err);
+    logError("GET /api/cars/promoted", err);
     res.status(500).json({ message: "Error fetching promoted cars" });
   }
 };
