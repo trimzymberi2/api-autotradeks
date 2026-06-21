@@ -24,6 +24,7 @@ export const createRentCar = async (req, res) => {
       color,
       seats,
       with_driver,
+      allowed_countries,
       available_from,
       available_to,
     } = req.body;
@@ -32,8 +33,8 @@ export const createRentCar = async (req, res) => {
       `INSERT INTO rent_cars 
       (title, description, price_per_day, weekly_offer_price, monthly_offer_price, minimum_days,
        brand, model, year, mileage, fuel_type, transmission, city, motor, customs, drivesystem,
-       color, seats, with_driver, available_from, available_to, user_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+       color, seats, with_driver, allowed_countries, available_from, available_to, user_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
       RETURNING *`,
       [
         title,
@@ -55,6 +56,7 @@ export const createRentCar = async (req, res) => {
         color,
         seats,
         with_driver === "true" || with_driver === true,
+        allowed_countries || null,
         available_from || null,
         available_to || null,
         req.user.id,
@@ -88,6 +90,51 @@ export const createRentCar = async (req, res) => {
   }
 };
 
+export const getRentCarsByUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await pool.query(
+      `SELECT rc.*, 
+        COALESCE(
+          json_agg(
+            rci.image_url
+          ) FILTER (WHERE rci.image_url IS NOT NULL), '[]'
+        ) as images,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', rcud.id,
+                'unavailable_from', rcud.unavailable_from,
+                'unavailable_to', rcud.unavailable_to,
+                'reason', rcud.reason
+              )
+              ORDER BY rcud.unavailable_from ASC
+            )
+            FROM rent_car_unavailable_dates rcud
+            WHERE rcud.rent_car_id = rc.id
+          ),
+          '[]'
+        ) as unavailable_dates
+      FROM rent_cars rc
+      LEFT JOIN rent_car_images rci ON rc.id = rci.rent_car_id
+      WHERE rc.user_id = $1
+      GROUP BY rc.id
+      ORDER BY rc.created_at DESC`,
+      [userId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    logError("GET /api/rent-cars/user/my-rent-cars", err);
+    res.status(500).json({
+      message: "Error fetching user rent cars",
+      error: err.message,
+    });
+  }
+};
+
 export const getRentCars = async (req, res) => {
   try {
     const {
@@ -110,6 +157,9 @@ export const getRentCars = async (req, res) => {
       maxKm,
       seats,
       with_driver,
+      allowed_countries,
+      available_from,
+      available_to,
       page = 1,
       limit = 12,
     } = req.query;
@@ -221,6 +271,48 @@ export const getRentCars = async (req, res) => {
       baseQuery += ` AND rent_cars.with_driver = $${values.length}`;
     }
 
+    if (allowed_countries) {
+      const selectedCountries = allowed_countries
+        .split(",")
+        .map((country) => country.trim())
+        .filter(Boolean);
+
+      if (selectedCountries.length > 0) {
+        const countryConditions = selectedCountries.map((country) => {
+          values.push(`%${country}%`);
+          return `rent_cars.allowed_countries ILIKE $${values.length}`;
+        });
+
+        baseQuery += ` AND (${countryConditions.join(" OR ")})`;
+      }
+    }
+
+    if (available_from) {
+      values.push(available_from);
+      baseQuery += ` AND rent_cars.available_from::date <= $${values.length}::date`;
+    }
+
+    if (available_to) {
+      values.push(available_to);
+      baseQuery += ` AND rent_cars.available_to::date >= $${values.length}::date`;
+    }
+
+    if (available_from && available_to) {
+      values.push(available_to);
+      const requestedToIndex = values.length;
+      values.push(available_from);
+      const requestedFromIndex = values.length;
+      baseQuery += `
+        AND NOT EXISTS (
+          SELECT 1
+          FROM rent_car_unavailable_dates rcud
+          WHERE rcud.rent_car_id = rent_cars.id
+            AND rcud.unavailable_from::date <= $${requestedToIndex}::date
+            AND rcud.unavailable_to::date >= $${requestedFromIndex}::date
+        )
+      `;
+    }
+
     const countQuery = `SELECT COUNT(*) ${baseQuery}`;
     const countResult = await pool.query(countQuery, values);
     const totalRentCars = Number(countResult.rows[0].count);
@@ -313,6 +405,344 @@ export const getRentCarById = async (req, res) => {
   } catch (err) {
     logError("GET /api/rent-cars/:id", err);
     res.status(500).json({ message: "Error fetching rent car" });
+  }
+};
+
+function parseImagesToDelete(imagesToDelete) {
+  if (!imagesToDelete) return [];
+
+  if (Array.isArray(imagesToDelete)) {
+    return imagesToDelete;
+  }
+
+  if (typeof imagesToDelete === "string") {
+    try {
+      const parsed = JSON.parse(imagesToDelete);
+      return Array.isArray(parsed) ? parsed : [imagesToDelete];
+    } catch {
+      return [imagesToDelete];
+    }
+  }
+
+  return [];
+}
+
+function getCloudinaryPublicId(imageUrl) {
+  return imageUrl
+    .split("/upload/")[1]
+    ?.replace(/^v\d+\//, "")
+    ?.replace(/\.[^/.]+$/, "");
+}
+
+export const updateRentCar = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const {
+      title,
+      description,
+      price_per_day,
+      weekly_offer_price,
+      monthly_offer_price,
+      minimum_days,
+      brand,
+      model,
+      year,
+      mileage,
+      fuel_type,
+      transmission,
+      city,
+      motor,
+      customs,
+      drivesystem,
+      color,
+      seats,
+      with_driver,
+      allowed_countries,
+      available_from,
+      available_to,
+      imagesToDelete,
+    } = req.body;
+
+    await client.query("BEGIN");
+
+    const existingResult = await client.query("SELECT * FROM rent_cars WHERE id=$1", [id]);
+    const rentCar = existingResult.rows[0];
+
+    if (!rentCar) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Rent car not found" });
+    }
+
+    if (rentCar.user_id !== req.user.id) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const updated = await client.query(
+      `UPDATE rent_cars
+       SET title=$1, description=$2, price_per_day=$3, weekly_offer_price=$4,
+           monthly_offer_price=$5, minimum_days=$6, brand=$7, model=$8, year=$9,
+           mileage=$10, fuel_type=$11, transmission=$12, city=$13, motor=$14,
+           customs=$15, drivesystem=$16, color=$17, seats=$18, with_driver=$19,
+           allowed_countries=$20, available_from=$21, available_to=$22
+       WHERE id=$23
+       RETURNING *`,
+      [
+        title ?? rentCar.title,
+        description ?? rentCar.description,
+        price_per_day ?? rentCar.price_per_day,
+        weekly_offer_price === "" ? null : weekly_offer_price ?? rentCar.weekly_offer_price,
+        monthly_offer_price === "" ? null : monthly_offer_price ?? rentCar.monthly_offer_price,
+        minimum_days ?? rentCar.minimum_days,
+        brand ?? rentCar.brand,
+        model ?? rentCar.model,
+        year === "" ? null : year ?? rentCar.year,
+        mileage === "" ? null : mileage ?? rentCar.mileage,
+        fuel_type ?? rentCar.fuel_type,
+        transmission ?? rentCar.transmission,
+        city ?? rentCar.city,
+        motor ?? rentCar.motor,
+        customs === undefined ? rentCar.customs : customs === "true" || customs === true,
+        drivesystem ?? rentCar.drivesystem,
+        color ?? rentCar.color,
+        seats ?? rentCar.seats,
+        with_driver === undefined ? rentCar.with_driver : with_driver === "true" || with_driver === true,
+        allowed_countries === "" ? null : allowed_countries ?? rentCar.allowed_countries,
+        available_from === "" ? null : available_from ?? rentCar.available_from,
+        available_to === "" ? null : available_to ?? rentCar.available_to,
+        id,
+      ]
+    );
+
+    const imagesToDeleteList = parseImagesToDelete(imagesToDelete);
+
+    for (const imageUrl of imagesToDeleteList) {
+      const imageResult = await client.query(
+        "SELECT image_url FROM rent_car_images WHERE rent_car_id=$1 AND image_url=$2",
+        [id, imageUrl]
+      );
+
+      if (imageResult.rows.length === 0) {
+        continue;
+      }
+
+      const publicId = getCloudinaryPublicId(imageUrl);
+
+      if (publicId) {
+        await cloudinary.uploader.destroy(publicId);
+      }
+
+      await client.query(
+        "DELETE FROM rent_car_images WHERE rent_car_id=$1 AND image_url=$2",
+        [id, imageUrl]
+      );
+    }
+
+    if (req.files && req.files.length > 0) {
+      const uploadPromises = req.files.map((file) =>
+        cloudinary.uploader.upload(file.path)
+      );
+      const results = await Promise.all(uploadPromises);
+
+      for (const result of results) {
+        await client.query(
+          "INSERT INTO rent_car_images (rent_car_id, image_url) VALUES ($1, $2)",
+          [id, result.secure_url]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+
+    res.json(updated.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    logError("PUT /api/rent-cars/:id", err);
+    res.status(500).json({
+      message: "Error updating rent car",
+      error: err.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+export const deleteRentCar = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+
+    await client.query("BEGIN");
+
+    const result = await client.query("SELECT * FROM rent_cars WHERE id=$1", [id]);
+    const rentCar = result.rows[0];
+
+    if (!rentCar) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Rent car not found" });
+    }
+
+    if (rentCar.user_id !== req.user.id) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const imagesResult = await client.query(
+      "SELECT image_url FROM rent_car_images WHERE rent_car_id=$1",
+      [id]
+    );
+
+    for (const image of imagesResult.rows) {
+      const publicId = getCloudinaryPublicId(image.image_url);
+
+      if (publicId) {
+        await cloudinary.uploader.destroy(publicId);
+      }
+    }
+
+    await client.query("DELETE FROM promoted_rent_cars WHERE rent_car_id=$1", [id]);
+    await client.query("DELETE FROM rent_car_images WHERE rent_car_id=$1", [id]);
+    await client.query("DELETE FROM rent_cars WHERE id=$1", [id]);
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Rent car deleted" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    logError("DELETE /api/rent-cars/:id", err);
+    res.status(500).json({
+      message: "Error deleting rent car",
+      error: err.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+export const getUnavailableDates = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const rentCarResult = await pool.query(
+      "SELECT id, user_id FROM rent_cars WHERE id=$1",
+      [id]
+    );
+    const rentCar = rentCarResult.rows[0];
+
+    if (!rentCar) {
+      return res.status(404).json({ message: "Rent car not found" });
+    }
+
+    if (rentCar.user_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const result = await pool.query(
+      `SELECT id, rent_car_id, unavailable_from, unavailable_to, reason, created_at
+       FROM rent_car_unavailable_dates
+       WHERE rent_car_id=$1
+       ORDER BY unavailable_from ASC`,
+      [id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    logError("GET /api/rent-cars/:id/unavailable-dates", err);
+    res.status(500).json({
+      message: "Error fetching unavailable dates",
+      error: err.message,
+    });
+  }
+};
+
+export const createUnavailableDate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { unavailable_from, unavailable_to, reason } = req.body;
+
+    if (!unavailable_from || !unavailable_to) {
+      return res.status(400).json({
+        message: "unavailable_from and unavailable_to are required",
+      });
+    }
+
+    if (new Date(unavailable_from) > new Date(unavailable_to)) {
+      return res.status(400).json({
+        message: "unavailable_to must be after unavailable_from",
+      });
+    }
+
+    const rentCarResult = await pool.query(
+      "SELECT id, user_id FROM rent_cars WHERE id=$1",
+      [id]
+    );
+    const rentCar = rentCarResult.rows[0];
+
+    if (!rentCar) {
+      return res.status(404).json({ message: "Rent car not found" });
+    }
+
+    if (rentCar.user_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO rent_car_unavailable_dates
+       (rent_car_id, unavailable_from, unavailable_to, reason)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, rent_car_id, unavailable_from, unavailable_to, reason, created_at`,
+      [id, unavailable_from, unavailable_to, reason || null]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    logError("POST /api/rent-cars/:id/unavailable-dates", err);
+    res.status(500).json({
+      message: "Error creating unavailable dates",
+      error: err.message,
+    });
+  }
+};
+
+export const deleteUnavailableDate = async (req, res) => {
+  try {
+    const { id, blockId } = req.params;
+
+    const rentCarResult = await pool.query(
+      "SELECT id, user_id FROM rent_cars WHERE id=$1",
+      [id]
+    );
+    const rentCar = rentCarResult.rows[0];
+
+    if (!rentCar) {
+      return res.status(404).json({ message: "Rent car not found" });
+    }
+
+    if (rentCar.user_id !== req.user.id) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const result = await pool.query(
+      `DELETE FROM rent_car_unavailable_dates
+       WHERE id=$1 AND rent_car_id=$2
+       RETURNING id`,
+      [blockId, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Unavailable date not found" });
+    }
+
+    res.json({ message: "Unavailable dates deleted" });
+  } catch (err) {
+    logError("DELETE /api/rent-cars/:id/unavailable-dates/:blockId", err);
+    res.status(500).json({
+      message: "Error deleting unavailable dates",
+      error: err.message,
+    });
   }
 };
 

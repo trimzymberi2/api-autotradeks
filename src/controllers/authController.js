@@ -88,7 +88,7 @@ export const getMe = async (req, res) => {
     }
 
     const result = await pool.query(
-      "SELECT id, name, email, phone, role, avatar, created_at FROM users WHERE id = $1",
+      "SELECT id, name, email, phone FROM users WHERE id = $1",
       [decoded.id]
     );
 
@@ -103,9 +103,9 @@ export const getMe = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role: user.role || "user",
-      avatar: user.avatar,
-      createdAt: user.created_at,
+      role: "user",
+      avatar: null,
+      createdAt: null,
     });
   } catch (err) {
     logError("GET /api/auth/me", err);
