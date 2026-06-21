@@ -21,7 +21,7 @@ app.use(cors({
     "https://www.autotradeks.com",
     "https://autotradeks.netlify.app",
     "https://www.rentacarks.com",
-    "https://rentacar-ks.netlify.app/"
+    "https://rentacar-ks.netlify.app"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
