@@ -19,7 +19,9 @@ app.use(cors({
     "http://localhost:5173",
     "https://autotradeks.com",
     "https://www.autotradeks.com",
-    "https://autotradeks.netlify.app"
+    "https://autotradeks.netlify.app",
+    "https://www.rentacarks.com",
+    "https://rentacar-ks.netlify.app/"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
