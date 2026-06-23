@@ -287,20 +287,13 @@ export const getRentCars = async (req, res) => {
       }
     }
 
-    if (available_from) {
-      values.push(available_from);
-      baseQuery += ` AND rent_cars.available_from::date <= $${values.length}::date`;
-    }
+    const requestedFrom = available_from || available_to;
+    const requestedTo = available_to || available_from;
 
-    if (available_to) {
-      values.push(available_to);
-      baseQuery += ` AND rent_cars.available_to::date >= $${values.length}::date`;
-    }
-
-    if (available_from && available_to) {
-      values.push(available_to);
+    if (requestedFrom && requestedTo) {
+      values.push(requestedTo);
       const requestedToIndex = values.length;
-      values.push(available_from);
+      values.push(requestedFrom);
       const requestedFromIndex = values.length;
       baseQuery += `
         AND NOT EXISTS (
