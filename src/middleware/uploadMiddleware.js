@@ -40,8 +40,9 @@ export const processToWebP = async (req, res, next) => {
         // Read the original file into buffer
         const inputBuffer = fs.readFileSync(file.path);
         
-        // Convert to WebP buffer
+        // Auto-orient phone photos from EXIF metadata before converting to WebP.
         const webpBuffer = await sharp(inputBuffer)
+          .rotate()
           .webp({ quality: 80 })
           .toBuffer();
 
