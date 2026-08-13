@@ -1,6 +1,7 @@
 import pool from "../config/db.js";
 import cloudinary from "../config/cloudinary.js";
 import { logError } from "../utils/logError.js";
+import { clearRentCarCache, createCacheKey, getCache, setCache } from "../utils/cache.js";
 
 export const createRentCar = async (req, res) => {
   try {
@@ -80,6 +81,7 @@ export const createRentCar = async (req, res) => {
       }
     }
 
+    clearRentCarCache();
     res.json(rentCar);
   } catch (err) {
     logError("POST /api/rent-cars", err);
@@ -163,6 +165,14 @@ export const getRentCars = async (req, res) => {
       page = 1,
       limit = 12,
     } = req.query;
+
+    const cacheKey = createCacheKey("rent-cars:list", req.query);
+    const cachedResponse = getCache(cacheKey);
+
+    if (cachedResponse) {
+      res.set("X-Cache", "HIT");
+      return res.json(cachedResponse);
+    }
 
     const currentPage = Number(page) || 1;
     const perPage = Number(limit) || 12;
@@ -345,13 +355,17 @@ export const getRentCars = async (req, res) => {
       delete rentCar.user_phone;
     }
 
-    res.json({
+    const responsePayload = {
       page: currentPage,
       limit: perPage,
       totalRentCars,
       totalPages,
       rentCars,
-    });
+    };
+
+    setCache(cacheKey, responsePayload);
+    res.set("X-Cache", "MISS");
+    res.json(responsePayload);
   } catch (err) {
     logError("GET /api/rent-cars", err);
     res.status(500).json({ message: "Error fetching rent cars" });
@@ -360,6 +374,14 @@ export const getRentCars = async (req, res) => {
 
 export const getRentCarById = async (req, res) => {
   try {
+    const cacheKey = createCacheKey("rent-cars:detail", { id: req.params.id });
+    const cachedResponse = getCache(cacheKey);
+
+    if (cachedResponse) {
+      res.set("X-Cache", "HIT");
+      return res.json(cachedResponse);
+    }
+
     const rentCarResult = await pool.query(
       `
       SELECT 
@@ -394,6 +416,8 @@ export const getRentCarById = async (req, res) => {
     delete rentCar.user_name;
     delete rentCar.user_phone;
 
+    setCache(cacheKey, rentCar);
+    res.set("X-Cache", "MISS");
     res.json(rentCar);
   } catch (err) {
     logError("GET /api/rent-cars/:id", err);
@@ -549,6 +573,7 @@ export const updateRentCar = async (req, res) => {
 
     await client.query("COMMIT");
 
+    clearRentCarCache();
     res.json(updated.rows[0]);
   } catch (err) {
     await client.query("ROLLBACK");
@@ -602,6 +627,7 @@ export const deleteRentCar = async (req, res) => {
 
     await client.query("COMMIT");
 
+    clearRentCarCache();
     res.json({ message: "Rent car deleted" });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -690,6 +716,7 @@ export const createUnavailableDate = async (req, res) => {
       [id, unavailable_from, unavailable_to, reason || null]
     );
 
+    clearRentCarCache();
     res.status(201).json(result.rows[0]);
   } catch (err) {
     logError("POST /api/rent-cars/:id/unavailable-dates", err);
@@ -729,6 +756,7 @@ export const deleteUnavailableDate = async (req, res) => {
       return res.status(404).json({ message: "Unavailable date not found" });
     }
 
+    clearRentCarCache();
     res.json({ message: "Unavailable dates deleted" });
   } catch (err) {
     logError("DELETE /api/rent-cars/:id/unavailable-dates/:blockId", err);
@@ -741,6 +769,14 @@ export const deleteUnavailableDate = async (req, res) => {
 
 export const getPromotedRentCars = async (req, res) => {
   try {
+    const cacheKey = createCacheKey("rent-cars:promoted");
+    const cachedResponse = getCache(cacheKey);
+
+    if (cachedResponse) {
+      res.set("X-Cache", "HIT");
+      return res.json(cachedResponse);
+    }
+
     const result = await pool.query(`
       SELECT 
         rent_cars.*,
@@ -773,6 +809,8 @@ export const getPromotedRentCars = async (req, res) => {
       delete rentCar.user_phone;
     }
 
+    setCache(cacheKey, rentCars);
+    res.set("X-Cache", "MISS");
     res.json(rentCars);
   } catch (err) {
     logError("GET /api/rent-cars/promoted", err);
