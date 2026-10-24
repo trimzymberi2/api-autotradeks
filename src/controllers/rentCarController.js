@@ -2,6 +2,7 @@ import pool from "../config/db.js";
 import cloudinary from "../config/cloudinary.js";
 import { logError } from "../utils/logError.js";
 import { clearRentCarCache, createCacheKey, getCache, setCache } from "../utils/cache.js";
+import { resolvePickupLocations, pickupLocationFilter } from "../utils/pickupLocations.js";
 
 export const createRentCar = async (req, res) => {
   try {
@@ -30,12 +31,13 @@ export const createRentCar = async (req, res) => {
       available_to,
     } = req.body;
 
+    const pickupLocations = resolvePickupLocations(req.body);
     const rentCarResult = await pool.query(
       `INSERT INTO rent_cars 
       (title, description, price_per_day, weekly_offer_price, monthly_offer_price, minimum_days,
        brand, model, year, mileage, fuel_type, transmission, city, motor, customs, drivesystem,
-       color, seats, with_driver, allowed_countries, available_from, available_to, user_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+       color, seats, with_driver, allowed_countries, available_from, available_to, user_id, pickup_locations)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
       RETURNING *`,
       [
         title,
@@ -50,7 +52,7 @@ export const createRentCar = async (req, res) => {
         mileage,
         fuel_type,
         transmission,
-        city,
+        pickupLocations[0],
         motor,
         customs === "true" || customs === true,
         drivesystem,
@@ -61,6 +63,7 @@ export const createRentCar = async (req, res) => {
         available_from || null,
         available_to || null,
         req.user.id,
+        pickupLocations,
       ]
     );
 
@@ -84,6 +87,7 @@ export const createRentCar = async (req, res) => {
     clearRentCarCache();
     res.json(rentCar);
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: err.message });
     logError("POST /api/rent-cars", err);
     res.status(500).json({
       message: "Error creating rent car",
@@ -233,7 +237,7 @@ export const getRentCars = async (req, res) => {
 
     if (city) {
       values.push(city);
-      baseQuery += ` AND rent_cars.city = $${values.length}`;
+      baseQuery += ` AND ${pickupLocationFilter(values.length)}`;
     }
 
     if (customs !== undefined) {
@@ -497,13 +501,14 @@ export const updateRentCar = async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     }
 
+    const pickupLocations = resolvePickupLocations(req.body, rentCar);
     const updated = await client.query(
       `UPDATE rent_cars
        SET title=$1, description=$2, price_per_day=$3, weekly_offer_price=$4,
            monthly_offer_price=$5, minimum_days=$6, brand=$7, model=$8, year=$9,
            mileage=$10, fuel_type=$11, transmission=$12, city=$13, motor=$14,
            customs=$15, drivesystem=$16, color=$17, seats=$18, with_driver=$19,
-           allowed_countries=$20, available_from=$21, available_to=$22
+           allowed_countries=$20, available_from=$21, available_to=$22, pickup_locations=$24
        WHERE id=$23
        RETURNING *`,
       [
@@ -519,7 +524,7 @@ export const updateRentCar = async (req, res) => {
         mileage === "" ? null : mileage ?? rentCar.mileage,
         fuel_type ?? rentCar.fuel_type,
         transmission ?? rentCar.transmission,
-        city ?? rentCar.city,
+        pickupLocations[0],
         motor ?? rentCar.motor,
         customs === undefined ? rentCar.customs : customs === "true" || customs === true,
         drivesystem ?? rentCar.drivesystem,
@@ -530,6 +535,7 @@ export const updateRentCar = async (req, res) => {
         available_from === "" ? null : available_from ?? rentCar.available_from,
         available_to === "" ? null : available_to ?? rentCar.available_to,
         id,
+        pickupLocations,
       ]
     );
 
@@ -578,6 +584,7 @@ export const updateRentCar = async (req, res) => {
   } catch (err) {
     await client.query("ROLLBACK");
     logError("PUT /api/rent-cars/:id", err);
+    if (err.status === 400) return res.status(400).json({ message: err.message });
     res.status(500).json({
       message: "Error updating rent car",
       error: err.message,
