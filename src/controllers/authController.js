@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
 import { generateToken } from "../utils/generateToken.js";
 import { logError } from "../utils/logError.js";
+import { isAdminUser } from "../utils/adminAccess.js";
 
 export const register = async (req, res) => {
   try {
@@ -60,6 +61,7 @@ export const login = async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
+        role: isAdminUser(user.id) ? "admin" : "user",
       },
       token: generateToken(user.id),
     });
@@ -103,7 +105,7 @@ export const getMe = async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      role: "user",
+      role: isAdminUser(user.id) ? "admin" : "user",
       avatar: null,
       createdAt: null,
     });

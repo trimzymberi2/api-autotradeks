@@ -6,6 +6,7 @@ import cors from "cors";
 import multer from "multer";
 
 import authRoutes from "./routes/authRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import rentCarRoutes from "./routes/rentCarRoutes.js";
 
 import { protect } from "./middleware/authMiddleware.js";
@@ -31,6 +32,7 @@ app.use(cors({
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/cars", carRoutes);
 app.use("/api/rent-cars", rentCarRoutes);
 app.get("/api/protected", protect, (req, res) => {
