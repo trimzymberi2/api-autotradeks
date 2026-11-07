@@ -1,6 +1,7 @@
 import test, { afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import pool from '../src/config/db.js';
+import cloudinary from '../src/config/cloudinary.js';
 import { resolvePickupLocations } from '../src/utils/pickupLocations.js';
 import { createRentCar, updateRentCar, getRentCars } from '../src/controllers/rentCarController.js';
 import { clearRentCarCache } from '../src/utils/cache.js';
@@ -28,12 +29,18 @@ test('rejects empty, malformed, excessive, and non-string locations', () => {
 });
 test('create sends the locations as a PostgreSQL array and syncs the legacy city', async () => {
   let captured;
-  mock.method(pool, 'query', async (sql, params) => {
-    captured = {sql, params};
-    return {rows: [{id: 7, city: params[12], pickup_locations: params[23]}]};
-  });
+  mock.method(pool, 'connect', async () => ({
+    query: async (sql, params) => {
+      if (sql.includes('INSERT INTO rent_cars')) {
+        captured = {sql, params};
+        return {rows: [{id: 7, city: params[12], pickup_locations: params[23]}]};
+      }
+      return {rows: []};
+    }, release() {},
+  }));
+  mock.method(cloudinary.uploader, 'upload', async () => ({secure_url:'https://example.test/car.webp'}));
   const res = response();
-  await createRentCar({body: {title: 'Golf', pickup_locations: JSON.stringify(['Prishtine', airport])}, user: {id: 42}}, res);
+  await createRentCar({body: {title: 'Golf', pickup_locations: JSON.stringify(['Prishtine', airport])}, files:[{path:'test.webp'}], user: {id: 42}}, res);
   assert.equal(res.code, 200);
   assert.equal(captured.params.length, 24);
   assert.equal(captured.params[12], 'Prishtine');
@@ -42,7 +49,7 @@ test('create sends the locations as a PostgreSQL array and syncs the legacy city
 test('invalid create is rejected before writing a listing', async () => {
   mock.method(pool, 'query', () => { throw Error('must not query'); });
   const res = response();
-  await createRentCar({body: {pickup_locations: '[]'}, user: {id: 42}}, res);
+  await createRentCar({body: {pickup_locations: '[]'}, files:[{path:'test.webp'}], user: {id: 42}}, res);
   assert.equal(res.code, 400);
 });
 test('editing locations persists the new array and first location within the existing transaction', async () => {

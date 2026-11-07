@@ -5,7 +5,11 @@ import { clearRentCarCache, createCacheKey, getCache, setCache } from "../utils/
 import { resolvePickupLocations, pickupLocationFilter } from "../utils/pickupLocations.js";
 
 export const createRentCar = async (req, res) => {
+  let client;
   try {
+    if (!Array.isArray(req.files) || req.files.length === 0) {
+      return res.status(400).json({ message: "Ngarkoni te pakten nje foto te vetures." });
+    }
     const {
       title,
       description,
@@ -32,7 +36,9 @@ export const createRentCar = async (req, res) => {
     } = req.body;
 
     const pickupLocations = resolvePickupLocations(req.body);
-    const rentCarResult = await pool.query(
+    client = await pool.connect();
+    await client.query("BEGIN");
+    const rentCarResult = await client.query(
       `INSERT INTO rent_cars 
       (title, description, price_per_day, weekly_offer_price, monthly_offer_price, minimum_days,
        brand, model, year, mileage, fuel_type, transmission, city, motor, customs, drivesystem,
@@ -77,22 +83,26 @@ export const createRentCar = async (req, res) => {
       const results = await Promise.all(uploadPromises);
 
       for (const result of results) {
-        await pool.query(
+        await client.query(
           "INSERT INTO rent_car_images (rent_car_id, image_url) VALUES ($1, $2)",
           [rentCar.id, result.secure_url]
         );
       }
     }
 
+    await client.query("COMMIT");
     clearRentCarCache();
     res.json(rentCar);
   } catch (err) {
+    if (client) await client.query("ROLLBACK");
     if (err.status === 400) return res.status(400).json({ message: err.message });
     logError("POST /api/rent-cars", err);
     res.status(500).json({
       message: "Error creating rent car",
       error: err.message,
     });
+  } finally {
+    client?.release();
   }
 };
 
@@ -776,13 +786,7 @@ export const deleteUnavailableDate = async (req, res) => {
 
 export const getPromotedRentCars = async (req, res) => {
   try {
-    const cacheKey = createCacheKey("rent-cars:promoted");
-    const cachedResponse = getCache(cacheKey);
-
-    if (cachedResponse) {
-      res.set("X-Cache", "HIT");
-      return res.json(cachedResponse);
-    }
+    res.set("Cache-Control", "no-store");
 
     const result = await pool.query(`
       SELECT 
@@ -794,7 +798,7 @@ export const getPromotedRentCars = async (req, res) => {
       JOIN rent_cars ON promoted_rent_cars.rent_car_id = rent_cars.id
       JOIN users ON rent_cars.user_id = users.id
       WHERE promoted_rent_cars.is_active = true
-      ORDER BY promoted_rent_cars.position ASC, promoted_rent_cars.created_at DESC
+      ORDER BY promoted_rent_cars.position ASC, promoted_rent_cars.created_at DESC, promoted_rent_cars.rent_car_id ASC
     `);
 
     const rentCars = result.rows;
@@ -816,8 +820,6 @@ export const getPromotedRentCars = async (req, res) => {
       delete rentCar.user_phone;
     }
 
-    setCache(cacheKey, rentCars);
-    res.set("X-Cache", "MISS");
     res.json(rentCars);
   } catch (err) {
     logError("GET /api/rent-cars/promoted", err);

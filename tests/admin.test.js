@@ -41,10 +41,10 @@ test('all admin endpoints reject anonymous, ordinary, and forged-role tokens bef
   const server=app.listen(0,'127.0.0.1'); await new Promise(resolve=>server.once('listening',resolve));
   try {
     const base='http://127.0.0.1:'+server.address().port;
-    for (const endpoint of ['/overview','/users','/users/30']) {
-      const anonymous=await fetch(base+'/api/admin'+endpoint); assert.equal(anonymous.status,401);
+    for (const [method,endpoint] of [['GET','/overview'],['GET','/users'],['GET','/users/30'],['GET','/promotions'],['GET','/cars'],['PUT','/promotions']]) {
+      const anonymous=await fetch(base+'/api/admin'+endpoint,{method}); assert.equal(anonymous.status,401);
       const token=jwt.sign({id:31,role:'admin'},process.env.JWT_SECRET);
-      const ordinary=await fetch(base+'/api/admin'+endpoint,{headers:{Authorization:'Bearer '+token}});
+      const ordinary=await fetch(base+'/api/admin'+endpoint,{method,headers:{Authorization:'Bearer '+token}});
       assert.equal(ordinary.status,403);
     }
   } finally { server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); }
